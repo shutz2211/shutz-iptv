@@ -4,9 +4,7 @@ https://us-b4-p-e-nq15.cdn.mdstrm.com/live-stream-gdai/6a024684fd4ca6a938f3a118/
 #EXTINF:-1,TN
 https://live-01-01-tn.vodgc.net/TN_DAI_Beta/index.m3u8
 #EXTINF:-1,A24
-https://g4.mc-hor.transport.edge-access.net/a12/ngrp:a24-100056_all/a24-100056_540p.m3u8
-#EXTINF:-1,LN+
-https://manifest.googlevideo.com/api/manifest/hls_playlist/expire/1786866328/ei/OBaBaoe-IOOPobIP7Y-R0A0/ip/181.14.114.225/id/FEWZjXJ7M0c.21/itag/96/source/yt_live_broadcast/requiressl/yes/ratebypass/yes/live/1/sgoap/gir%3Dyes%3Bitag%3D140/sgovp/gir%3Dyes%3Bitag%3D137/rqh/1/hls_chunk_host/rr3---sn-uxaxjvh5gbxoupo5-x1xsy.googlevideo.com/xpc/EgVo2aDSNQ%3D%3D/ss/1/bui/AZFlqhPhmDtLvcqwrnw8VglUxT0hhFlfkjyJsx7IKM0bTaWJEEf0gnoEM-iQUshkRWb_bUJN5lq9W5qe/spc/KBGBctJxPca-rDKa2d2GybYgpCe8f7kChua51_MBZkNByHfj5A/vprv/1/reg/0/playlist_type/DVR/hcs/sd/initcwndbps/3047500/met/1786844730,/mh/Ph/mm/44/mn/sn-uxaxjvh5gbxoupo5-x1xsy/ms/lva/mv/m/mvi/3/pl/22/rmhost/rr4---sn-uxaxjvh5gbxoupo5-x1xsy.googlevideo.com/rms/lva,lva/smhost/rr1---sn-uxaxjvh5gbxoupo5-x1xze.googlevideo.com/dover/11/pacing/0/keepalive/yes/fexp/51565116,51946837,52089683/mt/1786844436/sparams/expire,ei,ip,id,itag,source,requiressl,ratebypass,live,sgoap,sgovp,rqh,xpc,ss,bui,spc,vprv,reg,playlist_type/sig/AE0s2JYwRQIhAK-YUheddy9VVE4fpo7Vj32zjkhdMarnZl2KLvy8_YNoAiBo9YXy6C9wZVlm9RGdk4pSXSbaW8cYbWb9AR4xqJlxQw%3D%3D/lsparams/hls_chunk_host,hcs,initcwndbps,met,mh,mm,mn,ms,mv,mvi,pl,rmhost,rms,smhost/lsig/APaTxxMwRgIhANujbCMOJWjn3U_3AczRumVtNOF8s4gFSXc2r4kRvUvDAiEA_hcX1HHDbsf9cMTCzzEu2ar-FDDwpk3exxPoItpg3Aw%3D/playlist/index.m3u8
+https://g1.mc-slo.transport.edge-access.net/a12/ngrp:a24-100056_all/Playlist.m3u8?sense=true
 #EXTINF:-1,TYC SPORTS
 https://2.tvlibre.pe/tycsports/mono.m3u8?token=634d8184fdfb7b36a7bc680be0c315c1178d26b7-24-1786851808-1786833808
 #EXTINF:-1,DSPORTS
@@ -29,5 +27,3 @@ https://3.tvlibre.pe/tntsports/mono.m3u8?token=d0fa3d911f3efe814fe4ec76f93a50c9d
 https://5.tvlibre.pe/premiere1/mono.m3u8?token=c6e8134034e90725c38b786eddd02f424e1dabf2-2c-1786857360-1786839360
 #EXTINF:-SPORTSBR
 https://1.tvlibre.pe/sportv/mono.m3u8?token=b6d0f4ece9546e182361feea209f4f77ed95e55b-33-1786858375-1786840375
-
-
