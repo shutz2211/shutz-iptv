@@ -1,0 +1,31 @@
+#EXTM3U
+#EXTINF:-1,TELEFE
+https://us-b4-p-e-nq15.cdn.mdstrm.com/live-stream-gdai/6a024684fd4ca6a938f3a118/linear/hls/pa/event/ZTApTmdVQWOhwTvIXtIGXQ/stream/a7a23477-45dd-409c-b743-08895c04db44:SCL2/variant/1b42da22ff97bf390d7fe0dbaab7ba1f/bandwidth/1808281.m3u8?aid=69dfb44d09ecc98dc876969f&uid=CLsNwwM2DEkuODYhy4sy4guTJbteoxQc&sid=mnzo5If9MXrel9qVOba4YNQhWKl6x6nB&pid=D1YxMZZ7WhRSMFFrgPBJkG7mDTIdTErf&pid_dvr=uLOErhv1tnQ7aDTjRvdYnAdyxJoi3AlM&ref=https%3A%2F%2Fwww.mitelefe.com%2F&without_cookies=false&listenerid=&dnt=true&access_token=0h2fldOrpsPR0e05foE5rYmuaWxYL63gyP9AzwJRfIB7ACxf1kvBftVwNEVMDdFZ3pkyuX20cSO&adInsertionGoogleStreamId=a7a23477-45dd-409c-b743-08895c04db44%3ASCL2&CMCD=cid%3D%226a024684fd4ca6a938f3a118%22%2Cmtp%3D30200%2Cot%3Dm%2Csf%3Dh%2Csid%3D%22D1YxMZZ7WhRSMFFrgPBJkG7mDTIdTErf%22&es=us-b4-p-e-nq15.cdn.mdstrm.com&ote=1786921903160&ot=Jms_bIolU3EHnh5vDcVBBg&proto=https&pz=us
+#EXTINF:-1,TN
+https://youtu.be/cb12KmMMDJA
+#EXTINF:-1,A24
+https://youtu.be/ArKbAx1K-2U
+#EXTINF:-1,ELTRECE
+https://live-01-02-eltrece.vodgc.net/eltrecetv_noti/tracks-v3/mono.m3u8
+#EXTINF:-1,LN+
+https://youtu.be/FEWZjXJ7M0c
+#EXTINF:-1,TYC SPORTS
+https://2.tvlibre.pe/tycsports/mono.m3u8?token=634d8184fdfb7b36a7bc680be0c315c1178d26b7-24-1786851808-1786833808
+#EXTINF:-1,DSPORTS
+https://9.tvlibre.pe/dsports/mono.m3u8?token=42fd7b166f4e64fceced2135e14a2aff62b3b19d-a-1786852005-1786834005
+#EXTINF:-1,ESPN
+https://10.tvlibre.pe/espn/mono.m3u8?token=0efe1affa023641114801ac988588912fbe5dad4-8c-1786852312-1786834312
+#EXTINF:-1,DSPORTS2
+https://1.tvlibre.pe/dsports2/mono.m3u8?token=7fcc474d432b24d21866692e00a8caa77dde97cb-bd-1786853418-1786835418
+#EXTINF<:-1,DSPORTS+
+https://4.tvlibre.pe/dsportsplus/mono.m3u8?token=1e167cc3f75608c7f4d7e339bdc17c4ec92a21d0-d-1786853502-1786835502
+#EXTINF:-1,ESPN2
+https://4.tvlibre.pe/espn2/mono.m3u8?token=8690acb23975f2cc7a22a69812e12537a046aea2-4b-1786853652-1786835652
+#EXTINF:-1,ESPN3
+https://9.tvlibre.pe/espn3/mono.m3u8?token=174f36d75933c2734473e2d955cc71339dc0fdc3-aa-1786853713-1786835713
+#EXTINF:-1,ESPN PREMIUM
+https://10.tvlibre.pe/espnpremium/mono.m3u8?token=c43a2630a9bd8feccaacbe7f9a2b209568f7f469-75-1786854268-1786836268
+#EXTINF:-1,TNT SPORTS PREMIUM
+https://3.tvlibre.pe/tntsports/mono.m3u8?token=d0fa3d911f3efe814fe4ec76f93a50c9d7d4ba0e-ec-1786857158-1786839158
+#EXTINF:-1,PREMIEREBR
+https://5.tvlibre.pe/premiere1/mono.m3u8?token=c6e8134034e90725c38b786eddd02f424e1dabf2-2c-1786857360-1786839360
