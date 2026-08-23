@@ -26,15 +26,15 @@ HEADERS = {
 }
 
 def ejecutar_scraper():
-    print("[+] Limpiando base de datos y comenzando raspado real...")
-    # Borramos los registros viejos/rotos para empezar limpios
-    movies_collection.delete_many({})
+    print("[+] Limpiando colección y ejecutando scraper flexible...")
+    movies_collection.delete_many({}) # Limpiamos la base
     
     BASE_URL = "https://cuevana3i.bio"
     urls = [
         f"{BASE_URL}/",
         f"{BASE_URL}/peliculas/",
-        f"{BASE_URL}/estrenos/"
+        f"{BASE_URL}/estrenos/",
+        f"{BASE_URL}/series/"
     ]
     
     guardadas = 0
@@ -42,40 +42,69 @@ def ejecutar_scraper():
         try:
             res = requests.get(url, headers=HEADERS, timeout=10)
             if res.status_code != 200:
+                print(f"[-] Status {res.status_code} en {url}")
                 continue
                 
             soup = BeautifulSoup(res.text, "html.parser")
             
-            # Buscamos los contenedores de películas de Cuevana
-            items = soup.select(".Posters li, article.item, .TPost li, .item-peli")
+            # Buscamos TODOS los enlaces de la página
+            all_links = soup.find_all("a")
             
-            for item in items:
-                link_tag = item.find("a")
-                img_tag = item.find("img")
+            for a in all_links:
+                href = a.get("href", "")
                 
-                if link_tag and img_tag:
-                    href = link_tag.get("href", "")
-                    title = img_tag.get("alt", "") or link_tag.get("title", "") or item.get_text(strip=True)
-                    poster = img_tag.get("data-src") or img_tag.get("src") or img_tag.get("data-lazy-src") or ""
+                # Filtramos para asegurarnos de que sea una ficha de película o serie
+                if href and ("/pelicula/" in href or "/serie/" in href or "/episodio/" in href):
+                    img_tag = a.find("img")
                     
-                    # Validaciones estrictas: debe tener título, imagen y URL de película
-                    if title and poster and ("http" in poster or "//" in poster) and len(title) > 2:
-                        if not href.startswith("http"):
-                            href = BASE_URL + href
-                            
+                    # Intentamos obtener la imagen de cualquier atributo posible
+                    poster = ""
+                    if img_tag:
+                        poster = (
+                            img_tag.get("data-src") or 
+                            img_tag.get("src") or 
+                            img_tag.get("data-lazy-src") or 
+                            img_tag.get("srcset") or ""
+                        )
+                        # Si viene un srcset, nos quedamos con la primera URL
+                        if " " in poster:
+                            poster = poster.split(" ")[0]
+                    
+                    # Obtenemos el título de la película
+                    title = ""
+                    if img_tag and img_tag.get("alt"):
+                        title = img_tag.get("alt")
+                    elif a.get("title"):
+                        title = a.get("title")
+                    else:
+                        title = a.get_text(strip=True)
+                    
+                    # Normalizamos la URL si es relativa
+                    if href and not href.startswith("http"):
+                        href = BASE_URL + href
+
+                    # Si el poster viene relativo (ej: //imagen.jpg)
+                    if poster and poster.startswith("//"):
+                        poster = "https:" + poster
+                        
+                    # Si tenemos título y URL válida, guardamos
+                    if title and len(title.strip()) > 2:
                         peli = {
-                            "title": title,
+                            "title": title.strip(),
                             "url": href,
-                            "poster": poster
+                            "poster": poster.strip()
                         }
                         
-                        movies_collection.update_one({"url": href}, {"$set": peli}, upsert=True)
-                        guardadas += 1
-                        
+                        # upsert evita duplicados por URL
+                        res_db = movies_collection.update_one({"url": href}, {"$set": peli}, upsert=True)
+                        if res_db.upserted_id:
+                            guardadas += 1
+                            
+            print(f"[+] Éxito en {url}. Películas procesadas hasta ahora.")
         except Exception as e:
             print(f"[-] Error en {url}: {e}")
             
-    print(f"[🎉] Proceso terminado. Se guardaron {guardadas} películas reales.")
+    print(f"[🎉] Raspado finalizado con éxito. Nuevas guardadas: {guardadas}")
 
 @app.get("/")
 def home():
@@ -89,6 +118,5 @@ def trigger_scrape(background_tasks: BackgroundTasks):
 
 @app.get("/catalog")
 def get_catalog():
-    # Devuelve solo las películas que tengan título y afiche válido
-    movies = list(movies_collection.find({"poster": {"$ne": ""}, "title": {"$ne": ""}}, {"_id": 0}))
+    movies = list(movies_collection.find({}, {"_id": 0}))
     return movies
