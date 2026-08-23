@@ -1,13 +1,12 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import urllib.parse
 import requests
 from bs4 import BeautifulSoup
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from yt_dlp import YoutubeDL
-import urllib.parse
 
 app = FastAPI()
 
-# Permitir conexiones desde Flutter
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,14 +17,12 @@ app.add_middleware(
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
 }
 
 def extract_real_stream(embed_url: str) -> str | None:
-    """
-    Extrae el enlace directo (.m3u8 o .mp4) usando yt-dlp simulando 
-    las cabeceras correctas para evitar bloqueos por 403 Forbidden.
-    """
+    """Extrae el enlace directo (.m3u8 / .mp4) desde el reproductor con yt-dlp."""
     ydl_opts = {
         'format': 'best',
         'quiet': True,
@@ -41,90 +38,86 @@ def extract_real_stream(embed_url: str) -> str | None:
             info = ydl.extract_info(embed_url, download=False)
             return info.get('url')
     except Exception as e:
-        print(f"[-] yt-dlp no pudo resolver {embed_url}: {e}")
+        print(f"[-] yt-dlp fallo en {embed_url}: {e}")
         return None
 
-
-def resolve_player_iframes(page_url: str) -> str | None:
-    """
-    Navega a la página de la película, escanea todos los iFrames 
-    y busca un servidor de streaming que yt-dlp pueda parsear.
-    """
+def resolve_cuevana_stream(movie_url: str) -> str | None:
+    """Entra a la ficha de Cuevana y extrae los reproductores/iFrames."""
     try:
-        req_headers = HEADERS.copy()
-        req_headers["Referer"] = page_url
-        res = requests.get(page_url, headers=req_headers, timeout=8)
-        
+        res = requests.get(movie_url, headers=HEADERS, timeout=8)
         if res.status_code != 200:
             return None
 
         soup = BeautifulSoup(res.text, 'html.parser')
-        
-        # 1. Buscar iFrames directos en el DOM
-        iframes = soup.find_all('iframe')
-        for iframe in iframes:
-            src = iframe.get('src') or iframe.get('data-src')
+
+        # Buscar iFrames o data-src de reproductores dentro de la página
+        for iframe in soup.find_all(['iframe', 'a']):
+            src = iframe.get('src') or iframe.get('data-src') or iframe.get('href')
             if not src:
                 continue
 
             if src.startswith('//'):
                 src = 'https:' + src
             elif src.startswith('/'):
-                parsed_base = urllib.parse.urlparse(page_url)
-                src = f"{parsed_base.scheme}://{parsed_base.netloc}{src}"
+                src = f"https://cuevana3i.bio{src}"
 
-            # Intentamos extraer el stream desde la URL del iframe
+            # Filtrar enlaces irrelevantes
+            if any(domain in src for domain in ['facebook', 'twitter', 'whatsapp', 'telegram', 'cuevana3i.bio']):
+                continue
+
             stream = extract_real_stream(src)
             if stream:
                 return stream
 
-        # 2. Si no hay iFrames directos, intentar pasar la URL principal directamente a yt-dlp
-        return extract_real_stream(page_url)
-
-    except Exception as e:
-        print(f"[-] Error analizando la página {page_url}: {e}")
         return None
-
+    except Exception as e:
+        print(f"[-] Error en película {movie_url}: {e}")
+        return None
 
 @app.get("/catalog")
 def get_catalog():
-    """Obtiene el catálogo de películas más recientes y extrae sus retransmisiones."""
-    BASE_URL = "https://vidsrc.to"
+    BASE_URL = "https://cuevana3i.bio"
     try:
-        response = requests.get(f"{BASE_URL}/embed/movie", headers=HEADERS, timeout=8)
-        
+        response = requests.get(f"{BASE_URL}/inicio-2/", headers=HEADERS, timeout=8)
+        if response.status_code != 200:
+            response = requests.get(BASE_URL, headers=HEADERS, timeout=8)
+
         if response.status_code != 200:
             return get_fallback_catalog()
 
         soup = BeautifulSoup(response.text, 'html.parser')
         catalog = []
-        
-        # Selectores adaptados a sitios estilo vidsrc / cuevana
-        items = soup.select('.card, .item, .movie-item, .film-detail')
 
-        for item in items[:8]:  # Procesamos hasta 8 items para mantener el tiempo de respuesta bajo en Render
-            title_el = item.select_one('.title, h2, h3, .name, .film-name')
+        # Selectores específicos del tema WordPress / Cuevana
+        items = soup.select('ul.Posters li, .TItem, .item, article.item-movies')
+
+        for item in items[:8]:  # Límite para responder rápido en Render
+            title_el = item.select_one('.Title, .title, h2, h3, .entry-title')
             img_el = item.select_one('img')
             link_el = item.select_one('a')
 
-            if title_el:
+            if title_el and link_el:
                 title = title_el.get_text(strip=True)
+                
                 poster = ''
                 if img_el:
-                    poster = img_el.get('src') or img_el.get('data-src') or ''
-                    if poster.startswith('/'):
+                    poster = img_el.get('src') or img_el.get('data-src') or img_el.get('srcset') or ''
+                    if ' ' in poster:  # Si viene con srcset agarra la primera URL
+                        poster = poster.split(' ')[0]
+                    if poster.startswith('//'):
+                        poster = f"https:{poster}"
+                    elif poster.startswith('/'):
                         poster = f"{BASE_URL}{poster}"
 
-                # Obtener enlace de la película
-                movie_link = link_el.get('href') if link_el else None
-                if movie_link and movie_link.startswith('/'):
+                movie_link = link_el.get('href') or ''
+                if movie_link.startswith('/'):
                     movie_link = f"{BASE_URL}{movie_link}"
 
                 stream_url = None
                 if movie_link:
-                    stream_url = resolve_player_iframes(movie_link)
+                    stream_url = resolve_cuevana_stream(movie_link)
 
-                # Si no logra extraer el stream en vivo, se usa el demo HLS para evitar romper el player
+                # Fallback al video de prueba si un reproductor específico falla
                 if not stream_url:
                     stream_url = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
 
@@ -142,9 +135,8 @@ def get_catalog():
         return catalog if catalog else get_fallback_catalog()
 
     except Exception as e:
-        print(f"Error en catálogo: {e}")
+        print(f"Error raspando Cuevana: {e}")
         return get_fallback_catalog()
-
 
 def get_fallback_catalog():
     return [
@@ -163,7 +155,6 @@ def get_fallback_catalog():
             "headers": {"User-Agent": HEADERS["User-Agent"]}
         }
     ]
-
 
 if __name__ == "__main__":
     import uvicorn
