@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, BackgroundTasks
@@ -26,12 +27,10 @@ HEADERS = {
 }
 
 def ejecutar_scraper():
-    print("[+] Ejecutando scraper profundo...")
-    # Ya no borramos la base de datos, así las películas se van acumulando
+    print("[+] Ejecutando scraper masivo con anti-bloqueo (modo humano)...")
     
     BASE_URL = "https://cuevana3i.bio"
     
-    # Recorremos 15 páginas de películas y 5 de series
     urls = [f"{BASE_URL}/"]
     urls += [f"{BASE_URL}/peliculas/page/{i}/" for i in range(1, 16)]
     urls += [f"{BASE_URL}/series/page/{i}/" for i in range(1, 6)]
@@ -39,17 +38,21 @@ def ejecutar_scraper():
     guardadas = 0
     for url in urls:
         try:
+            print(f"[*] Visitando: {url}")
             res = requests.get(url, headers=HEADERS, timeout=10)
+            
             if res.status_code != 200:
+                print(f"[-] Bloqueo o error {res.status_code} en {url}. Saltando página...")
+                time.sleep(2) # Pausa incluso si falla
                 continue
                 
             soup = BeautifulSoup(res.text, "html.parser")
             all_links = soup.find_all("a")
             
+            nuevas_en_pagina = 0
             for a in all_links:
                 href = a.get("href", "")
                 
-                # Filtramos para asegurarnos de que sea una ficha
                 if href and ("/pelicula/" in href or "/serie/" in href or "/episodio/" in href):
                     img_tag = a.find("img")
                     
@@ -85,15 +88,20 @@ def ejecutar_scraper():
                             "poster": poster.strip()
                         }
                         
-                        # upsert=True actualiza si existe, o inserta si es nueva
                         res_db = movies_collection.update_one({"url": href}, {"$set": peli}, upsert=True)
                         if res_db.upserted_id:
+                            nuevas_en_pagina += 1
                             guardadas += 1
                             
+            print(f"[+] {nuevas_en_pagina} nuevas encontradas en esta página.")
+            
+            # Pausa de 2 segundos antes de pasar a la siguiente página para evitar el baneo
+            time.sleep(2)
+            
         except Exception as e:
             print(f"[-] Error en {url}: {e}")
             
-    print(f"[🎉] Raspado masivo finalizado. Nuevas guardadas: {guardadas}")
+    print(f"[🎉] Raspado masivo finalizado. Total nuevas guardadas hoy: {guardadas}")
 
 @app.get("/")
 def home():
@@ -103,7 +111,7 @@ def home():
 @app.get("/scrape")
 def trigger_scrape(background_tasks: BackgroundTasks):
     background_tasks.add_task(ejecutar_scraper)
-    return {"status": "Escaneo masivo iniciado en segundo plano."}
+    return {"status": "Escaneo masivo iniciado en segundo plano. Revisar los logs en Render."}
 
 @app.get("/catalog")
 def get_catalog():
