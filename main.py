@@ -1,3 +1,19 @@
+import os
+import requests
+from bs4 import BeautifulSoup
+from fastapi import FastAPI, BackgroundTasks
+from pymongo import MongoClient
+
+app = FastAPI()
+
+# Conexión a MongoDB Atlas
+MONGO_URI = "mongodb+srv://skinfesttournament_db_user:132123HolaMongo@cluster0.lx60nil.mongodb.net/?appName=Cluster0"
+
+client = MongoClient(MONGO_URI)
+db = client["shutz_tv_db"]
+movies_collection = db["movies"]
+
+# --- FUNCION DEL SCRAPER ---
 def ejecutar_scraper():
     print("[+] Iniciando raspado de Cuevana...")
     headers = {
@@ -43,3 +59,20 @@ def ejecutar_scraper():
             print(f"[+] Página {page} procesada (+{len(peli_list)} películas).")
         except Exception as e:
             print(f"[-] Error en página {page}: {e}")
+
+# --- RUTAS DE LA API ---
+
+@app.get("/")
+def home():
+    return {"status": "API Shutz TV Activa"}
+
+@app.get("/scrape-all")
+@app.get("/scrape")
+def trigger_scrape(background_tasks: BackgroundTasks):
+    background_tasks.add_task(ejecutar_scraper)
+    return {"status": "Escaneo iniciado en segundo plano. La base de datos se irá poblando."}
+
+@app.get("/catalog")
+def get_catalog():
+    movies = list(movies_collection.find({}, {"_id": 0}))
+    return {"total": len(movies), "movies": movies}
