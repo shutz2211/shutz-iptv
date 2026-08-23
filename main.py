@@ -1,5 +1,4 @@
 import os
-import re
 import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, BackgroundTasks
@@ -23,55 +22,22 @@ db = client["shutz_tv_db"]
 movies_collection = db["movies"]
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
 }
 
-# --- FUNCIÓN PARA EXTRAER EL ENLACE M3U8 / MP4 FINAL ---
-def obtener_stream_m3u8(url_pelicula):
-    try:
-        res = requests.get(url_pelicula, headers=HEADERS, timeout=10)
-        if res.status_code != 200:
-            return None
-            
-        soup = BeautifulSoup(res.text, "html.parser")
-        
-        # 1. Buscar si hay streams M3U8 directos en el HTML o scripts
-        m3u8_matches = re.findall(r'(https?://[^\s\'"]+\.m3u8[^\s\'"]*)', res.text)
-        if m3u8_matches:
-            return m3u8_matches[0]
-
-        # 2. Buscar enlaces de embed / IFrames de reproductores
-        iframes = soup.find_all("iframe")
-        for iframe in iframes:
-            src = iframe.get("src") or iframe.get("data-src") or ""
-            if src:
-                if not src.startswith("http"):
-                    src = "https:" + src if src.startswith("//") else src
-                
-                # Intentar resolver el iframe
-                try:
-                    res_iframe = requests.get(src, headers=HEADERS, timeout=5)
-                    m3u8_inside = re.findall(r'(https?://[^\s\'"]+\.m3u8[^\s\'"]*)', res_iframe.text)
-                    if m3u8_inside:
-                        return m3u8_inside[0]
-                except:
-                    continue
-                    
-        return None
-    except Exception as e:
-        print(f"Error resolviendo m3u8: {e}")
-        return None
-
-# --- SCRAPER PRINCIPAL ---
 def ejecutar_scraper():
-    print("[+] Iniciando raspado de Cuevana...")
+    print("[+] Limpiando base de datos y comenzando raspado real...")
+    # Borramos los registros viejos/rotos para empezar limpios
+    movies_collection.delete_many({})
+    
     BASE_URL = "https://cuevana3i.bio"
+    urls = [
+        f"{BASE_URL}/",
+        f"{BASE_URL}/peliculas/",
+        f"{BASE_URL}/estrenos/"
+    ]
     
-    urls = [f"{BASE_URL}/"]
-    urls += [f"{BASE_URL}/peliculas/page/{i}/" for i in range(1, 10)]
-    
-    total_nuevas = 0
-    
+    guardadas = 0
     for url in urls:
         try:
             res = requests.get(url, headers=HEADERS, timeout=10)
@@ -79,56 +45,50 @@ def ejecutar_scraper():
                 continue
                 
             soup = BeautifulSoup(res.text, "html.parser")
-            links = soup.find_all("a")
             
-            for a in links:
-                href = a.get("href", "")
-                img_tag = a.find("img")
+            # Buscamos los contenedores de películas de Cuevana
+            items = soup.select(".Posters li, article.item, .TPost li, .item-peli")
+            
+            for item in items:
+                link_tag = item.find("a")
+                img_tag = item.find("img")
                 
-                if href and img_tag:
-                    title = a.get_text(strip=True) or img_tag.get("alt", "") or a.get("title", "")
-                    img_src = img_tag.get("data-src") or img_tag.get("src") or img_tag.get("data-lazy-src") or ""
+                if link_tag and img_tag:
+                    href = link_tag.get("href", "")
+                    title = img_tag.get("alt", "") or link_tag.get("title", "") or item.get_text(strip=True)
+                    poster = img_tag.get("data-src") or img_tag.get("src") or img_tag.get("data-lazy-src") or ""
                     
-                    if len(title) > 2 and img_src and ("/pelicula/" in href or "/serie/" in href):
+                    # Validaciones estrictas: debe tener título, imagen y URL de película
+                    if title and poster and ("http" in poster or "//" in poster) and len(title) > 2:
                         if not href.startswith("http"):
                             href = BASE_URL + href
                             
                         peli = {
                             "title": title,
                             "url": href,
-                            "poster": img_src
+                            "poster": poster
                         }
                         
-                        result = movies_collection.update_one({"url": href}, {"$set": peli}, upsert=True)
-                        if result.upserted_id:
-                            total_nuevas += 1
+                        movies_collection.update_one({"url": href}, {"$set": peli}, upsert=True)
+                        guardadas += 1
                         
         except Exception as e:
             print(f"[-] Error en {url}: {e}")
             
-    print(f"[🎉] Escaneo completado. Nuevas: {total_nuevas}")
-
-# --- RUTAS DE LA API ---
+    print(f"[🎉] Proceso terminado. Se guardaron {guardadas} películas reales.")
 
 @app.get("/")
 def home():
     return {"status": "API Shutz TV Activa"}
 
 @app.get("/scrape-all")
+@app.get("/scrape")
 def trigger_scrape(background_tasks: BackgroundTasks):
     background_tasks.add_task(ejecutar_scraper)
     return {"status": "Escaneo iniciado en segundo plano."}
 
 @app.get("/catalog")
 def get_catalog():
-    movies = list(movies_collection.find({}, {"_id": 0}))
-    return {"total": len(movies), "movies": movies}
-
-# NUEVA RUTA: Recibe la URL de la película y devuelve el M3U8 directo
-@app.get("/get-stream")
-def get_stream(movie_url: str):
-    stream_url = obtener_stream_m3u8(movie_url)
-    if stream_url:
-        return {"status": "success", "m3u8": stream_url}
-    else:
-        return {"status": "error", "message": "No se pudo extraer el stream m3u8 directamente. El reproductor requiere evaluación JS."}
+    # Devuelve solo las películas que tengan título y afiche válido
+    movies = list(movies_collection.find({"poster": {"$ne": ""}, "title": {"$ne": ""}}, {"_id": 0}))
+    return movies
