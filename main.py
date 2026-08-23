@@ -2,9 +2,19 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
 
 app = FastAPI()
+
+# --- REGLAS DE CORS (Permite que Flutter/Web consuma la API) ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Permite peticiones desde cualquier origen/app
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Conexión a MongoDB Atlas
 MONGO_URI = "mongodb+srv://skinfesttournament_db_user:132123HolaMongo@cluster0.lx60nil.mongodb.net/?appName=Cluster0"
@@ -21,31 +31,26 @@ def ejecutar_scraper():
     
     BASE_URL = "https://cuevana3i.bio"
     
-    # Probamos la portada y las secciones principales
-    urls = [
-        f"{BASE_URL}/",
-        f"{BASE_URL}/estrenos/",
-        f"{BASE_URL}/peliculas/"
-    ]
+    # Recorremos páginas de películas y series
+    urls = [f"{BASE_URL}/"]
+    urls += [f"{BASE_URL}/peliculas/page/{i}/" for i in range(1, 16)]
+    urls += [f"{BASE_URL}/series/page/{i}/" for i in range(1, 6)]
+    
+    total_nuevas = 0
     
     for url in urls:
         try:
             res = requests.get(url, headers=headers, timeout=10)
             if res.status_code != 200:
-                print(f"[-] Error HTTP {res.status_code} en {url}")
                 continue
                 
             soup = BeautifulSoup(res.text, "html.parser")
-            
-            # Selector universal: busca cualquier enlace que contenga una imagen dentro
             links = soup.find_all("a")
             
-            peli_count = 0
             for a in links:
                 href = a.get("href", "")
                 img_tag = a.find("img")
                 
-                # Si tiene link, imagen y parece una película/serie
                 if href and img_tag:
                     title = a.get_text(strip=True) or img_tag.get("alt", "") or a.get("title", "")
                     img_src = img_tag.get("data-src") or img_tag.get("src") or img_tag.get("data-lazy-src") or ""
@@ -60,13 +65,15 @@ def ejecutar_scraper():
                             "poster": img_src
                         }
                         
-                        # Guarda o actualiza en MongoDB
-                        movies_collection.update_one({"url": href}, {"$set": peli}, upsert=True)
-                        peli_count += 1
+                        result = movies_collection.update_one({"url": href}, {"$set": peli}, upsert=True)
+                        if result.upserted_id:
+                            total_nuevas += 1
                         
-            print(f"[+] Éxito en {url}: Se guardaron {peli_count} ítems.")
+            print(f"[+] Procesado {url}...")
         except Exception as e:
             print(f"[-] Error procesando {url}: {e}")
+            
+    print(f"[🎉] Escaneo masivo finalizado. Nuevas agregadas: {total_nuevas}")
 
 @app.get("/")
 def home():
