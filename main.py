@@ -1,9 +1,9 @@
+import re
 import urllib.parse
 import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from yt_dlp import YoutubeDL
 
 app = FastAPI()
 
@@ -17,32 +17,12 @@ app.add_middleware(
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "es-ES,es;q=0.9",
 }
 
-def extract_real_stream(embed_url: str) -> str | None:
-    """Extrae el enlace directo (.m3u8 / .mp4) desde el reproductor con yt-dlp."""
-    ydl_opts = {
-        'format': 'best',
-        'quiet': True,
-        'no_warnings': True,
-        'extract_flat': False,
-        'http_headers': {
-            'User-Agent': HEADERS['User-Agent'],
-            'Referer': urllib.parse.urlparse(embed_url).scheme + "://" + urllib.parse.urlparse(embed_url).netloc
-        }
-    }
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(embed_url, download=False)
-            return info.get('url')
-    except Exception as e:
-        print(f"[-] yt-dlp fallo en {embed_url}: {e}")
-        return None
-
-def resolve_cuevana_stream(movie_url: str) -> str | None:
-    """Entra a la ficha de Cuevana y extrae los reproductores/iFrames."""
+def get_cuevana_movie_data(movie_url: str):
+    """Extrae el ID de la película (o slug) y busca opciones de reproducción válidas."""
     try:
         res = requests.get(movie_url, headers=HEADERS, timeout=8)
         if res.status_code != 200:
@@ -50,28 +30,32 @@ def resolve_cuevana_stream(movie_url: str) -> str | None:
 
         soup = BeautifulSoup(res.text, 'html.parser')
 
-        # Buscar iFrames o data-src de reproductores dentro de la página
-        for iframe in soup.find_all(['iframe', 'a']):
-            src = iframe.get('src') or iframe.get('data-src') or iframe.get('href')
+        # Buscar iFrames incrustados en la página
+        for iframe in soup.find_all('iframe'):
+            src = iframe.get('src') or iframe.get('data-src') or ''
             if not src:
                 continue
-
+            
             if src.startswith('//'):
                 src = 'https:' + src
-            elif src.startswith('/'):
-                src = f"https://cuevana3i.bio{src}"
 
-            # Filtrar enlaces irrelevantes
-            if any(domain in src for domain in ['facebook', 'twitter', 'whatsapp', 'telegram', 'cuevana3i.bio']):
+            # Ignorar widgets sociales
+            if any(x in src for x in ['facebook', 'twitter', 'telegram', 'whatsapp']):
                 continue
 
-            stream = extract_real_stream(src)
-            if stream:
-                return stream
+            # Si encontramos un reproductor externo
+            if 'http' in src:
+                return src
+
+        # Si no hay iframe simple, intentar obtener el ID de IMDb si está disponible
+        imdb_match = re.search(r'tt\d{7,8}', res.text)
+        if imdb_match:
+            imdb_id = imdb_match.group(0)
+            return f"https://vidsrc.cc/v2/embed/movie/{imdb_id}"
 
         return None
     except Exception as e:
-        print(f"[-] Error en película {movie_url}: {e}")
+        print(f"[-] Error resolviendo película {movie_url}: {e}")
         return None
 
 @app.get("/catalog")
@@ -88,22 +72,25 @@ def get_catalog():
         soup = BeautifulSoup(response.text, 'html.parser')
         catalog = []
 
-        # Selectores específicos del tema WordPress / Cuevana
+        # Buscar los items en el catálogo
         items = soup.select('ul.Posters li, .TItem, .item, article.item-movies')
 
-        for item in items[:8]:  # Límite para responder rápido en Render
+        for item in items:
             title_el = item.select_one('.Title, .title, h2, h3, .entry-title')
             img_el = item.select_one('img')
             link_el = item.select_one('a')
 
             if title_el and link_el:
                 title = title_el.get_text(strip=True)
-                
+                if not title:
+                    continue
+
                 poster = ''
                 if img_el:
-                    poster = img_el.get('src') or img_el.get('data-src') or img_el.get('srcset') or ''
-                    if ' ' in poster:  # Si viene con srcset agarra la primera URL
-                        poster = poster.split(' ')[0]
+                    poster = img_el.get('src') or img_el.get('data-src') or ''
+                    if not poster and img_el.get('srcset'):
+                        poster = img_el.get('srcset').split(' ')[0]
+                    
                     if poster.startswith('//'):
                         poster = f"https:{poster}"
                     elif poster.startswith('/'):
@@ -115,11 +102,12 @@ def get_catalog():
 
                 stream_url = None
                 if movie_link:
-                    stream_url = resolve_cuevana_stream(movie_link)
+                    stream_url = get_cuevana_movie_data(movie_link)
 
-                # Fallback al video de prueba si un reproductor específico falla
-                if not stream_url:
-                    stream_url = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+                # Si no logra resolver un reproductor único, genera un embed de respaldo por búsqueda
+                if not stream_url and movie_link:
+                    clean_title = urllib.parse.quote(title)
+                    stream_url = f"https://vidsrc.cc/v2/embed/movie?title={clean_title}"
 
                 catalog.append({
                     "title": title,
@@ -131,6 +119,10 @@ def get_catalog():
                         "Referer": BASE_URL
                     }
                 })
+
+                # Traer hasta 20 películas para cargar rápido
+                if len(catalog) >= 20:
+                    break
 
         return catalog if catalog else get_fallback_catalog()
 
@@ -145,13 +137,6 @@ def get_fallback_catalog():
             "type": "movie",
             "poster": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Big_buck_bunny_poster_big.jpg/800px-Big_buck_bunny_poster_big.jpg",
             "stream_url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-            "headers": {"User-Agent": HEADERS["User-Agent"]}
-        },
-        {
-            "title": "Sintel (Demo HLS)",
-            "type": "movie",
-            "poster": "https://upload.wikimedia.org/wikipedia/commons/Sintel_poster.jpg",
-            "stream_url": "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8",
             "headers": {"User-Agent": HEADERS["User-Agent"]}
         }
     ]
