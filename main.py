@@ -22,57 +22,46 @@ def ejecutar_scraper():
     
     BASE_URL = "https://cuevana3i.bio"
     
-    for page in range(1, 6):
-        url = f"{BASE_URL}/peliculas/page/{page}/"
+    # Probamos tanto la portada como la paginación estándar
+    urls_to_scrape = [f"{BASE_URL}/"] + [f"{BASE_URL}/inicio/page/{i}/" for i in range(1, 6)]
+    
+    for url in urls_to_scrape:
         try:
             res = requests.get(url, headers=headers, timeout=10)
             if res.status_code != 200:
-                print(f"[-] Status {res.status_code} en página {page}")
+                print(f"[-] Status {res.status_code} en {url}")
                 continue
                 
             soup = BeautifulSoup(res.text, "html.parser")
-            items = soup.select("ul.Posters li, article.item, .TPost li")
+            # Selectores amplios para capturar los contenedores de Cuevana
+            items = soup.select("ul.Posters li, article.item, .TPost li, div.Posters a, .item-peli")
             
             peli_list = []
             for item in items:
-                title_elem = item.select_one(".Title, h2, .entry-title")
-                link_elem = item.select_one("a")
+                title_elem = item.select_one(".Title, h2, h3, .entry-title, .title")
+                link_elem = item if item.name == "a" else item.select_one("a")
                 img_elem = item.select_one("img")
                 
-                if title_elem and link_elem:
-                    title = title_elem.get_text(strip=True)
+                if link_elem:
+                    title = title_elem.get_text(strip=True) if title_elem else item.get("title", "")
                     link = link_elem.get("href", "")
-                    img = img_elem.get("data-src") or img_elem.get("src", "") if img_elem else ""
+                    img = ""
+                    if img_elem:
+                        img = img_elem.get("data-src") or img_elem.get("src") or img_elem.get("data-lazy-src") or ""
                     
-                    if link and not link.startswith("http"):
-                        link = BASE_URL + link
+                    if title and link:
+                        if not link.startswith("http"):
+                            link = BASE_URL + link
+                            
+                        peli = {
+                            "title": title,
+                            "url": link,
+                            "poster": img
+                        }
                         
-                    peli = {
-                        "title": title,
-                        "url": link,
-                        "poster": img
-                    }
-                    
-                    movies_collection.update_one({"url": link}, {"$set": peli}, upsert=True)
-                    peli_list.append(peli)
-                    
-            print(f"[+] Página {page} procesada (+{len(peli_list)} películas).")
+                        movies_collection.update_one({"url": link}, {"$set": peli}, upsert=True)
+                        peli_list.append(peli)
+                        
+            print(f"[+] Procesado {url} (+{len(peli_list)} películas).")
         except Exception as e:
-            print(f"[-] Error en página {page}: {e}")
-
-# --- RUTAS DE LA API ---
-
-@app.get("/")
-def home():
-    return {"status": "API Shutz TV Activa"}
-
-@app.get("/scrape-all")
-@app.get("/scrape")
-def trigger_scrape(background_tasks: BackgroundTasks):
-    background_tasks.add_task(ejecutar_scraper)
-    return {"status": "Escaneo iniciado en segundo plano. La base de datos se irá poblando."}
-
-@app.get("/catalog")
-def get_catalog():
-    movies = list(movies_collection.find({}, {"_id": 0}))
-    return {"total": len(movies), "movies": movies}
+            print(f"[-] Error en {url}: {e}")
