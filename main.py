@@ -1,7 +1,4 @@
-import re
-import urllib.parse
 import requests
-from bs4 import BeautifulSoup
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -17,117 +14,50 @@ app.add_middleware(
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "es-ES,es;q=0.9",
 }
 
-def get_cuevana_movie_data(movie_url: str):
-    """Extrae el ID de la película (o slug) y busca opciones de reproducción válidas."""
-    try:
-        res = requests.get(movie_url, headers=HEADERS, timeout=8)
-        if res.status_code != 200:
-            return None
-
-        soup = BeautifulSoup(res.text, 'html.parser')
-
-        # Buscar iFrames incrustados en la página
-        for iframe in soup.find_all('iframe'):
-            src = iframe.get('src') or iframe.get('data-src') or ''
-            if not src:
-                continue
-            
-            if src.startswith('//'):
-                src = 'https:' + src
-
-            # Ignorar widgets sociales
-            if any(x in src for x in ['facebook', 'twitter', 'telegram', 'whatsapp']):
-                continue
-
-            # Si encontramos un reproductor externo
-            if 'http' in src:
-                return src
-
-        # Si no hay iframe simple, intentar obtener el ID de IMDb si está disponible
-        imdb_match = re.search(r'tt\d{7,8}', res.text)
-        if imdb_match:
-            imdb_id = imdb_match.group(0)
-            return f"https://vidsrc.cc/v2/embed/movie/{imdb_id}"
-
-        return None
-    except Exception as e:
-        print(f"[-] Error resolviendo película {movie_url}: {e}")
-        return None
+# API pública de TMDB para traer tendencias/populares en español latino
+TMDB_POPULAR_URL = "https://api.themoviedb.org/3/movie/popular?api_key=15d2fd480aa7a47cf35870167339d765&language=es-MX&page=1"
+IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
 
 @app.get("/catalog")
 def get_catalog():
-    BASE_URL = "https://cuevana3i.bio"
     try:
-        response = requests.get(f"{BASE_URL}/inicio-2/", headers=HEADERS, timeout=8)
-        if response.status_code != 200:
-            response = requests.get(BASE_URL, headers=HEADERS, timeout=8)
-
-        if response.status_code != 200:
+        res = requests.get(TMDB_POPULAR_URL, headers=HEADERS, timeout=8)
+        if res.status_code != 200:
             return get_fallback_catalog()
 
-        soup = BeautifulSoup(response.text, 'html.parser')
+        data = res.json()
+        results = data.get("results", [])
         catalog = []
 
-        # Buscar los items en el catálogo
-        items = soup.select('ul.Posters li, .TItem, .item, article.item-movies')
+        for movie in results[:20]:
+            title = movie.get("title") or movie.get("original_title")
+            poster_path = movie.get("poster_path")
+            movie_id = movie.get("id")
 
-        for item in items:
-            title_el = item.select_one('.Title, .title, h2, h3, .entry-title')
-            img_el = item.select_one('img')
-            link_el = item.select_one('a')
+            if not title or not movie_id:
+                continue
 
-            if title_el and link_el:
-                title = title_el.get_text(strip=True)
-                if not title:
-                    continue
+            poster = f"{IMAGE_BASE_URL}{poster_path}" if poster_path else ""
 
-                poster = ''
-                if img_el:
-                    poster = img_el.get('src') or img_el.get('data-src') or ''
-                    if not poster and img_el.get('srcset'):
-                        poster = img_el.get('srcset').split(' ')[0]
-                    
-                    if poster.startswith('//'):
-                        poster = f"https:{poster}"
-                    elif poster.startswith('/'):
-                        poster = f"{BASE_URL}{poster}"
+            # Reproductor de embed que sirve la película automáticamente por TMDB ID
+            stream_url = f"https://vidsrc.cc/v2/embed/movie/{movie_id}?autoPlay=false"
 
-                movie_link = link_el.get('href') or ''
-                if movie_link.startswith('/'):
-                    movie_link = f"{BASE_URL}{movie_link}"
-
-                stream_url = None
-                if movie_link:
-                    stream_url = get_cuevana_movie_data(movie_link)
-
-                # Si no logra resolver un reproductor único, genera un embed de respaldo por búsqueda
-                if not stream_url and movie_link:
-                    clean_title = urllib.parse.quote(title)
-                    stream_url = f"https://vidsrc.cc/v2/embed/movie?title={clean_title}"
-
-                catalog.append({
-                    "title": title,
-                    "type": "movie",
-                    "poster": poster,
-                    "stream_url": stream_url,
-                    "headers": {
-                        "User-Agent": HEADERS["User-Agent"],
-                        "Referer": BASE_URL
-                    }
-                })
-
-                # Traer hasta 20 películas para cargar rápido
-                if len(catalog) >= 20:
-                    break
+            catalog.append({
+                "title": title,
+                "type": "movie",
+                "poster": poster,
+                "stream_url": stream_url,
+                "headers": {
+                    "User-Agent": HEADERS["User-Agent"]
+                }
+            })
 
         return catalog if catalog else get_fallback_catalog()
 
     except Exception as e:
-        print(f"Error raspando Cuevana: {e}")
+        print(f"Error cargando catálogo: {e}")
         return get_fallback_catalog()
 
 def get_fallback_catalog():
