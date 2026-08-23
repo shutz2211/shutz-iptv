@@ -13,7 +13,6 @@ client = MongoClient(MONGO_URI)
 db = client["shutz_tv_db"]
 movies_collection = db["movies"]
 
-# --- FUNCION DEL SCRAPER ---
 def ejecutar_scraper():
     print("[+] Iniciando raspado de Cuevana...")
     headers = {
@@ -22,46 +21,64 @@ def ejecutar_scraper():
     
     BASE_URL = "https://cuevana3i.bio"
     
-    # Probamos tanto la portada como la paginación estándar
-    urls_to_scrape = [f"{BASE_URL}/"] + [f"{BASE_URL}/inicio/page/{i}/" for i in range(1, 6)]
+    # Probamos la portada y las secciones principales
+    urls = [
+        f"{BASE_URL}/",
+        f"{BASE_URL}/estrenos/",
+        f"{BASE_URL}/peliculas/"
+    ]
     
-    for url in urls_to_scrape:
+    for url in urls:
         try:
             res = requests.get(url, headers=headers, timeout=10)
             if res.status_code != 200:
-                print(f"[-] Status {res.status_code} en {url}")
+                print(f"[-] Error HTTP {res.status_code} en {url}")
                 continue
                 
             soup = BeautifulSoup(res.text, "html.parser")
-            # Selectores amplios para capturar los contenedores de Cuevana
-            items = soup.select("ul.Posters li, article.item, .TPost li, div.Posters a, .item-peli")
             
-            peli_list = []
-            for item in items:
-                title_elem = item.select_one(".Title, h2, h3, .entry-title, .title")
-                link_elem = item if item.name == "a" else item.select_one("a")
-                img_elem = item.select_one("img")
+            # Selector universal: busca cualquier enlace que contenga una imagen dentro
+            links = soup.find_all("a")
+            
+            peli_count = 0
+            for a in links:
+                href = a.get("href", "")
+                img_tag = a.find("img")
                 
-                if link_elem:
-                    title = title_elem.get_text(strip=True) if title_elem else item.get("title", "")
-                    link = link_elem.get("href", "")
-                    img = ""
-                    if img_elem:
-                        img = img_elem.get("data-src") or img_elem.get("src") or img_elem.get("data-lazy-src") or ""
+                # Si tiene link, imagen y parece una película/serie
+                if href and img_tag:
+                    title = a.get_text(strip=True) or img_tag.get("alt", "") or a.get("title", "")
+                    img_src = img_tag.get("data-src") or img_tag.get("src") or img_tag.get("data-lazy-src") or ""
                     
-                    if title and link:
-                        if not link.startswith("http"):
-                            link = BASE_URL + link
+                    if len(title) > 2 and img_src:
+                        if not href.startswith("http"):
+                            href = BASE_URL + href
                             
                         peli = {
                             "title": title,
-                            "url": link,
-                            "poster": img
+                            "url": href,
+                            "poster": img_src
                         }
                         
-                        movies_collection.update_one({"url": link}, {"$set": peli}, upsert=True)
-                        peli_list.append(peli)
+                        # Guarda o actualiza en MongoDB
+                        movies_collection.update_one({"url": href}, {"$set": peli}, upsert=True)
+                        peli_count += 1
                         
-            print(f"[+] Procesado {url} (+{len(peli_list)} películas).")
+            print(f"[+] Éxito en {url}: Se guardaron {peli_count} ítems.")
         except Exception as e:
-            print(f"[-] Error en {url}: {e}")
+            print(f"[-] Error procesando {url}: {e}")
+
+@app.get("/")
+def home():
+    return {"status": "API Shutz TV Activa"}
+
+@app.get("/scrape-all")
+@app.get("/scrape")
+def trigger_scrape(background_tasks: BackgroundTasks):
+    background_tasks.add_task(ejecutar_scraper)
+    return {"status": "Escaneo iniciado en segundo plano."}
+
+@app.get("/catalog")
+def get_catalog():
+    movies = list(movies_collection.find({}, {"_id": 0}))
+    return {"total": len(movies), "movies": movies}
