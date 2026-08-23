@@ -1,4 +1,5 @@
 import urllib.parse
+import time
 import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI
@@ -19,98 +20,105 @@ HEADERS = {
     "Accept-Language": "es-ES,es;q=0.9,en;q=0.8"
 }
 
-def fetch_popular_movies():
+# Cache global en memoria para guardar las películas scrapeadas de toda la web
+CACHE_CATALOG = []
+LAST_SCRAPE_TIME = 0
+CACHE_DURATION = 3600  # Vuelve a recorrer el sitio completo cada 1 hora (3600 seg)
+
+def scrape_entire_website(max_pages=20):
     """
-    Obtiene las películas populares raspando la sección de tendencias de JustWatch Argentina/España.
+    Recorre el sitio página por página hasta que no haya más contenido 
+    o alcance el límite de seguridad (max_pages).
     """
-    url = "https://www.justwatch.com/es/peliculas"
-    movies = []
-    try:
-        res = requests.get(url, headers=HEADERS, timeout=6)
-        if res.status_code == 200:
+    all_movies = []
+    seen_titles = set()
+    page = 1
+    
+    print("[+] Iniciando recorrido completo del sitio web...")
+
+    while page <= max_pages:
+        # La estructura típica de paginación
+        url = f"https://www.cinecalidad.ms/page/{page}/" if page > 1 else "https://www.cinecalidad.ms/"
+        
+        try:
+            res = requests.get(url, headers=HEADERS, timeout=6)
+            
+            # Si la página da 404 o falla, llegamos al final del sitio
+            if res.status_code != 200:
+                print(f"[*] Fin del sitio alcanzado en la página {page}. HTTP: {res.status_code}")
+                break
+
             soup = BeautifulSoup(res.text, 'html.parser')
             
-            # Buscamos las tarjetas de películas en el HTML
-            items = soup.select('.title-list-row__column-header, .picture-comp, a.title-list-grid__item--link')
+            # Seleccionamos las tarjetas de películas (ajustar selector según el sitio)
+            items = soup.select('article.item, div.home-pelikulas div.item, .poster')
             
+            # Si no hay más películas en esta página, detenemos el recorrido
+            if not items:
+                print(f"[*] No se encontraron más películas en la página {page}. Finalizando recorrido.")
+                break
+
+            movies_found_in_page = 0
+
             for item in items:
-                img_el = item.select_one('img')
+                img_el = item.find('img')
+                link_el = item.find('a')
+                
                 if not img_el:
                     continue
 
-                title = img_el.get('alt') or ''
+                title = img_el.get('alt') or img_el.get('title') or ''
+                title = title.strip()
                 poster = img_el.get('src') or img_el.get('data-src') or ''
 
-                if title and poster and not poster.endswith('.svg'):
-                    # Si la imagen es relativa la completamos
-                    if poster.startswith('//'):
-                        poster = f"https:{poster}"
-                    
-                    # Generamos la URL de reproducción embedding por nombre de título
+                if title and poster and title not in seen_titles:
+                    seen_titles.add(title)
                     clean_title = urllib.parse.quote(title)
+                    
+                    # Estructura del reproductor reproduciendo el título
                     stream_url = f"https://vidsrc.cc/v2/embed/movie?title={clean_title}"
 
-                    movies.append({
+                    all_movies.append({
                         "title": title,
                         "type": "movie",
                         "poster": poster,
                         "stream_url": stream_url,
                         "headers": {"User-Agent": HEADERS["User-Agent"]}
                     })
+                    movies_found_in_page += 1
 
-                if len(movies) >= 18:
-                    break
-    except Exception as e:
-        print(f"[-] Error en JustWatch scraper: {e}")
+            print(f"[+] Página {page} procesada exitosamente. Películas añadidas: {movies_found_in_page}")
+            
+            # Si una página no sumó películas nuevas, cortar para evitar bucles infinitos
+            if movies_found_in_page == 0:
+                break
 
-    return movies
+            page += 1
+            time.sleep(0.3)  # Pequeña pausa para no saturar ni ser bloqueados
+
+        except Exception as e:
+            print(f"[-] Error raspando la página {page}: {e}")
+            break
+
+    print(f"[✔] Recorrido finalizado. Total de películas obtenidas: {len(all_movies)}")
+    return all_movies
+
 
 @app.get("/catalog")
-def get_catalog():
-    # 1. Intentamos obtener las películas
-    catalog = fetch_popular_movies()
+def get_catalog(force_refresh: bool = False):
+    global CACHE_CATALOG, LAST_SCRAPE_TIME
+    
+    current_time = time.time()
+    
+    # Si el catálogo está vacío o el caché ya venció (pasó más de 1 hora), escanea todo de nuevo
+    if not CACHE_CATALOG or (current_time - LAST_SCRAPE_TIME > CACHE_DURATION) or force_refresh:
+        scraped_data = scrape_entire_website(max_pages=50) # Cambiá 50 por la cantidad límite de páginas a recorrer
+        
+        if scraped_data:
+            CACHE_CATALOG = scraped_data
+            LAST_SCRAPE_TIME = current_time
 
-    # 2. Si JustWatch bloquea por User-Agent, usamos un catálogo estático amplio de estrenos reales
-    if not catalog:
-        catalog = [
-            {
-                "title": "Dune: Parte Dos",
-                "type": "movie",
-                "poster": "https://image.tmdb.org/t/p/w500/8b8R8A88Mje929xR2T358s9T3S1.jpg",
-                "stream_url": "https://vidsrc.cc/v2/embed/movie/693134",
-                "headers": {"User-Agent": HEADERS["User-Agent"]}
-            },
-            {
-                "title": "Deadpool & Wolverine",
-                "type": "movie",
-                "poster": "https://image.tmdb.org/t/p/w500/8cdWjvZ21I3L3i4S3f4f31i3.jpg",
-                "stream_url": "https://vidsrc.cc/v2/embed/movie/533535",
-                "headers": {"User-Agent": HEADERS["User-Agent"]}
-            },
-            {
-                "title": "Oppenheimer",
-                "type": "movie",
-                "poster": "https://image.tmdb.org/t/p/w500/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg",
-                "stream_url": "https://vidsrc.cc/v2/embed/movie/872585",
-                "headers": {"User-Agent": HEADERS["User-Agent"]}
-            },
-            {
-                "title": "Spider-Man: Across the Spider-Verse",
-                "type": "movie",
-                "poster": "https://image.tmdb.org/t/p/w500/8Vt6mWEReuy4Of61Lnj5XjR3eL8.jpg",
-                "stream_url": "https://vidsrc.cc/v2/embed/movie/569094",
-                "headers": {"User-Agent": HEADERS["User-Agent"]}
-            },
-            {
-                "title": "Avatar: El Camino del Agua",
-                "type": "movie",
-                "poster": "https://image.tmdb.org/t/p/w500/t68241L139c23315a63914a82.jpg",
-                "stream_url": "https://vidsrc.cc/v2/embed/movie/76600",
-                "headers": {"User-Agent": HEADERS["User-Agent"]}
-            }
-        ]
-
-    return catalog
+    return CACHE_CATALOG
 
 if __name__ == "__main__":
     import uvicorn
