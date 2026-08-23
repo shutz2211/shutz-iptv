@@ -26,38 +26,33 @@ HEADERS = {
 }
 
 def ejecutar_scraper():
-    print("[+] Limpiando colección y ejecutando scraper flexible...")
-    movies_collection.delete_many({}) # Limpiamos la base
+    print("[+] Ejecutando scraper profundo...")
+    # Ya no borramos la base de datos, así las películas se van acumulando
     
     BASE_URL = "https://cuevana3i.bio"
-    urls = [
-        f"{BASE_URL}/",
-        f"{BASE_URL}/peliculas/",
-        f"{BASE_URL}/estrenos/",
-        f"{BASE_URL}/series/"
-    ]
+    
+    # Recorremos 15 páginas de películas y 5 de series
+    urls = [f"{BASE_URL}/"]
+    urls += [f"{BASE_URL}/peliculas/page/{i}/" for i in range(1, 16)]
+    urls += [f"{BASE_URL}/series/page/{i}/" for i in range(1, 6)]
     
     guardadas = 0
     for url in urls:
         try:
             res = requests.get(url, headers=HEADERS, timeout=10)
             if res.status_code != 200:
-                print(f"[-] Status {res.status_code} en {url}")
                 continue
                 
             soup = BeautifulSoup(res.text, "html.parser")
-            
-            # Buscamos TODOS los enlaces de la página
             all_links = soup.find_all("a")
             
             for a in all_links:
                 href = a.get("href", "")
                 
-                # Filtramos para asegurarnos de que sea una ficha de película o serie
+                # Filtramos para asegurarnos de que sea una ficha
                 if href and ("/pelicula/" in href or "/serie/" in href or "/episodio/" in href):
                     img_tag = a.find("img")
                     
-                    # Intentamos obtener la imagen de cualquier atributo posible
                     poster = ""
                     if img_tag:
                         poster = (
@@ -66,11 +61,9 @@ def ejecutar_scraper():
                             img_tag.get("data-lazy-src") or 
                             img_tag.get("srcset") or ""
                         )
-                        # Si viene un srcset, nos quedamos con la primera URL
                         if " " in poster:
                             poster = poster.split(" ")[0]
                     
-                    # Obtenemos el título de la película
                     title = ""
                     if img_tag and img_tag.get("alt"):
                         title = img_tag.get("alt")
@@ -79,15 +72,12 @@ def ejecutar_scraper():
                     else:
                         title = a.get_text(strip=True)
                     
-                    # Normalizamos la URL si es relativa
                     if href and not href.startswith("http"):
                         href = BASE_URL + href
 
-                    # Si el poster viene relativo (ej: //imagen.jpg)
                     if poster and poster.startswith("//"):
                         poster = "https:" + poster
                         
-                    # Si tenemos título y URL válida, guardamos
                     if title and len(title.strip()) > 2:
                         peli = {
                             "title": title.strip(),
@@ -95,16 +85,15 @@ def ejecutar_scraper():
                             "poster": poster.strip()
                         }
                         
-                        # upsert evita duplicados por URL
+                        # upsert=True actualiza si existe, o inserta si es nueva
                         res_db = movies_collection.update_one({"url": href}, {"$set": peli}, upsert=True)
                         if res_db.upserted_id:
                             guardadas += 1
                             
-            print(f"[+] Éxito en {url}. Películas procesadas hasta ahora.")
         except Exception as e:
             print(f"[-] Error en {url}: {e}")
             
-    print(f"[🎉] Raspado finalizado con éxito. Nuevas guardadas: {guardadas}")
+    print(f"[🎉] Raspado masivo finalizado. Nuevas guardadas: {guardadas}")
 
 @app.get("/")
 def home():
@@ -114,7 +103,7 @@ def home():
 @app.get("/scrape")
 def trigger_scrape(background_tasks: BackgroundTasks):
     background_tasks.add_task(ejecutar_scraper)
-    return {"status": "Escaneo iniciado en segundo plano."}
+    return {"status": "Escaneo masivo iniciado en segundo plano."}
 
 @app.get("/catalog")
 def get_catalog():
