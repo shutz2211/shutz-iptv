@@ -1,9 +1,12 @@
 import urllib.parse
+import urllib3
 import time
 import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = FastAPI()
 
@@ -17,90 +20,94 @@ app.add_middleware(
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "es-ES,es;q=0.9,en;q=0.8"
 }
 
-# Cache global en memoria para guardar las películas scrapeadas de toda la web
 CACHE_CATALOG = []
 LAST_SCRAPE_TIME = 0
-CACHE_DURATION = 3600  # Vuelve a recorrer el sitio completo cada 1 hora (3600 seg)
+CACHE_DURATION = 86400  # Se actualiza una vez al día (24 hrs) porque es un raspado masivo
 
-def scrape_entire_website(max_pages=20):
+def scrape_cuevana_entire_site(max_pages=None):
     """
-    Recorre el sitio página por página hasta que no haya más contenido 
-    o alcance el límite de seguridad (max_pages).
+    Si max_pages es None, recorre INFINITAMENTE todas las páginas del sitio
+    hasta que no existan más películas o la web dé 404.
     """
     all_movies = []
     seen_titles = set()
     page = 1
     
-    print("[+] Iniciando recorrido completo del sitio web...")
+    print("[+] Iniciando recorrido COMPLETO e ilimitado de cuevana3i.bio...")
 
-    while page <= max_pages:
-        # La estructura típica de paginación
-        url = f"https://www.cinecalidad.ms/page/{page}/" if page > 1 else "https://www.cinecalidad.ms/"
-        
+    while True:
+        # Freno de seguridad manual opcional
+        if max_pages and page > max_pages:
+            print(f"[*] Se alcanzó el límite configurado de {max_pages} páginas.")
+            break
+
+        url = "https://cuevana3i.bio/peliculas" if page == 1 else f"https://cuevana3i.bio/peliculas/page/{page}/"
+
         try:
-            res = requests.get(url, headers=HEADERS, timeout=6)
-            
-            # Si la página da 404 o falla, llegamos al final del sitio
+            res = requests.get(url, headers=HEADERS, timeout=10, verify=False)
+
+            # Si el sitio responde 404 significa que superamos la última página real
             if res.status_code != 200:
-                print(f"[*] Fin del sitio alcanzado en la página {page}. HTTP: {res.status_code}")
+                print(f"[*] Fin definitivo del catálogo alcanzado en la página {page}. HTTP {res.status_code}")
                 break
 
             soup = BeautifulSoup(res.text, 'html.parser')
-            
-            # Seleccionamos las tarjetas de películas (ajustar selector según el sitio)
-            items = soup.select('article.item, div.home-pelikulas div.item, .poster')
-            
-            # Si no hay más películas en esta página, detenemos el recorrido
+
+            # Selectores de tarjetas en Cuevana 3
+            items = soup.select('li.TItem, ul.MovieList li, article.Posters-item, div.Posters-item, article.item, .post')
+
             if not items:
-                print(f"[*] No se encontraron más películas en la página {page}. Finalizando recorrido.")
+                print(f"[*] No hay más contenido en la página {page}. Fin del sitio.")
                 break
 
             movies_found_in_page = 0
 
             for item in items:
                 img_el = item.find('img')
-                link_el = item.find('a')
-                
                 if not img_el:
                     continue
 
                 title = img_el.get('alt') or img_el.get('title') or ''
                 title = title.strip()
-                poster = img_el.get('src') or img_el.get('data-src') or ''
+
+                poster = img_el.get('data-src') or img_el.get('src') or ''
+
+                if poster.startswith('//'):
+                    poster = 'https:' + poster
 
                 if title and poster and title not in seen_titles:
                     seen_titles.add(title)
                     clean_title = urllib.parse.quote(title)
-                    
-                    # Estructura del reproductor reproduciendo el título
+
                     stream_url = f"https://vidsrc.cc/v2/embed/movie?title={clean_title}"
 
                     all_movies.append({
                         "title": title,
                         "type": "movie",
                         "poster": poster,
-                        "stream_url": stream_url,
-                        "headers": {"User-Agent": HEADERS["User-Agent"]}
+                        "stream_url": stream_url
                     })
                     movies_found_in_page += 1
 
-            print(f"[+] Página {page} procesada exitosamente. Películas añadidas: {movies_found_in_page}")
-            
-            # Si una página no sumó películas nuevas, cortar para evitar bucles infinitos
+            print(f"[+] Página {page} extraída con éxito. (+{movies_found_in_page} películas)")
+
+            # Si una página no sumó ningún elemento nuevo, cortamos el bucle
             if movies_found_in_page == 0:
+                print(f"[*] No se detectaron películas nuevas en la página {page}. Finalizando...")
                 break
 
             page += 1
-            time.sleep(0.3)  # Pequeña pausa para no saturar ni ser bloqueados
+            time.sleep(0.2)  # Pausa breve para evitar saturar el servidor
 
         except Exception as e:
-            print(f"[-] Error raspando la página {page}: {e}")
+            print(f"[-] Error inesperado en página {page}: {e}")
             break
 
-    print(f"[✔] Recorrido finalizado. Total de películas obtenidas: {len(all_movies)}")
+    print(f"[✔] Recorrido 100% finalizado. Total de películas obtenidas: {len(all_movies)}")
     return all_movies
 
 
@@ -109,10 +116,10 @@ def get_catalog(force_refresh: bool = False):
     global CACHE_CATALOG, LAST_SCRAPE_TIME
     
     current_time = time.time()
-    
-    # Si el catálogo está vacío o el caché ya venció (pasó más de 1 hora), escanea todo de nuevo
+
     if not CACHE_CATALOG or (current_time - LAST_SCRAPE_TIME > CACHE_DURATION) or force_refresh:
-        scraped_data = scrape_entire_website(max_pages=50) # Cambiá 50 por la cantidad límite de páginas a recorrer
+        # Pasar max_pages=None para recorrer la web ENTERA
+        scraped_data = scrape_cuevana_entire_site(max_pages=None)
         
         if scraped_data:
             CACHE_CATALOG = scraped_data
