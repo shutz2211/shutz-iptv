@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import requests
 from bs4 import BeautifulSoup
+from yt_dlp import YoutubeDL
 
 app = FastAPI()
 
@@ -18,12 +19,28 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
+def extract_real_stream(embed_url: str) -> str | None:
+    """Intenta extraer la URL directa de video (.m3u8 / .mp4) usando yt-dlp."""
+    ydl_opts = {
+        'format': 'best',
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False,
+    }
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(embed_url, download=False)
+            return info.get('url')
+    except Exception as e:
+        print(f"Error extrayendo stream con yt-dlp de {embed_url}: {e}")
+        return None
+
 @app.get("/catalog")
 def get_catalog():
-    """Rasca la lista de películas/series o devuelve un catálogo demo si no hay resultados."""
+    """Rasca películas/series de vidsrc.to y extrae streams reales."""
     try:
         url = "https://vidsrc.to"
-        response = requests.get(url, headers=HEADERS, timeout=5)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         
         if response.status_code != 200:
             return get_fallback_catalog()
@@ -32,9 +49,10 @@ def get_catalog():
         catalog = []
         items = soup.select('.card, .item, .movie-item')
 
-        for item in items[:15]:
+        for item in items[:10]:  # Límite a 10 para evitar sobrecargar la extracción
             title_el = item.select_one('.title, h2, h3, .name')
             img_el = item.select_one('img')
+            link_el = item.select_one('a')
 
             if title_el and img_el:
                 title = title_el.get_text(strip=True)
@@ -43,11 +61,25 @@ def get_catalog():
                 if poster.startswith('/'):
                     poster = f"https://vidsrc.to{poster}"
 
+                # Intentamos obtener la URL de detalle o embed
+                item_url = link_el.get('href') if link_el else None
+                if item_url and item_url.startswith('/'):
+                    item_url = f"https://vidsrc.to{item_url}"
+
+                # Extraemos la URL real de transmisión
+                stream_url = None
+                if item_url:
+                    stream_url = extract_real_stream(item_url)
+
+                # Si no se pudo resolver el stream directo, se asigna un fallback para que no rompa la app
+                if not stream_url:
+                    stream_url = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+
                 catalog.append({
                     "title": title,
                     "type": "movie",
                     "poster": poster,
-                    "stream_url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+                    "stream_url": stream_url,
                     "headers": {
                         "User-Agent": HEADERS["User-Agent"],
                         "Referer": url
